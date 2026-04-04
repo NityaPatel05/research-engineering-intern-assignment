@@ -2,7 +2,8 @@ import logging
 import os
 import json
 import time
-import google.generativeai as genai
+from xmlrpc import client
+from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -12,8 +13,19 @@ async def stream_response(query: str, context_results: list):
     Builds the system prompt, streams tokens, then invokes follow-up generator.
     """
     try:
-        genai.configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        if not api_key:
+            yield f"data: {json.dumps({'type': 'error', 'content': 'OPENROUTER_API_KEY not set in .env'})}\n\n"
+            return
+            
+        client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+            default_headers={
+                "HTTP-Referer": "http://localhost:3000",
+                "X-Title": "SimPPL Dashboard",
+            }
+        )
         
         system = """You are a social media research analyst. Answer questions about Reddit data using ONLY the provided context. Be precise and cite specific authors, subreddits, or topics from the context when relevant."""
         
@@ -25,17 +37,18 @@ async def stream_response(query: str, context_results: list):
         
         t0 = time.time()
         
-        response = model.generate_content(
-            full_prompt, 
+        response = await client.chat.completions.create(
+            model="google/gemma-4-26b-a4b-it",
+            messages=[{"role": "user", "content": full_prompt}],
             stream=True,
-            generation_config=genai.types.GenerationConfig(temperature=0.3)
+            temperature=0.3
         )
-        
         full_answer = ""
-        for chunk in response:
-            if chunk.text:
-                full_answer += chunk.text
-                yield f"data: {json.dumps({'type': 'token', 'content': chunk.text})}" + "\n\n"
+        async for chunk in response:
+            token = chunk.choices[0].delta.content or ""
+            if token:
+                full_answer += token
+                yield f"data: {json.dumps({'type': 'token', 'content': token})}" + "\n\n"
         
         latency = time.time() - t0
         logger.info(f"Chat stream finished. Latency: {latency:.2f}s")
@@ -48,13 +61,21 @@ async def stream_response(query: str, context_results: list):
             f"Do not return markdown blocks, just the raw JSON list format [\"Question 1\", \"Question 2\", \"Question 3\"]."
         )        
         try:
-            sug_res = model.generate_content(sug_prompt, generation_config=genai.types.GenerationConfig(temperature=0.5))
-            # Clean up response to ensure valid json
-            txt = sug_res.text.strip()
+            sug_res = await client.chat.completions.create(
+                model="google/gemma-4-26b-a4b-it",
+                messages=[{"role": "user", "content": sug_prompt}],
+                temperature=0.5
+            )            # Clean up response to ensure valid json
+            txt = sug_res.choices[0].message.content.strip()
             if txt.startswith("```json"): txt = txt[7:]
             if txt.startswith("```"): txt = txt[3:]
             if txt.endswith("```"): txt = txt[:-3]
             txt = txt.strip()
+            start = txt.find("[")
+            end   = txt.rfind("]") + 1
+            if start != -1 and end > start:
+                txt = txt[start:end]
+            
             
             suggestions = json.loads(txt)
             if not isinstance(suggestions, list): suggestions = []

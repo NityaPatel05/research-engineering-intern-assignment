@@ -23,3 +23,4 @@ numpy==1.26.4
 chromadb==0.5.7
 redis==5.1.0
 datamapplot>=0.4.2
+openai>=1.0.0
