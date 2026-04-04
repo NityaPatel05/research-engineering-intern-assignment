@@ -65,6 +65,7 @@ def retrieve(query: str, col_posts, col_graphs, col_topics, top_k: int = 5) -> d
                         # Convert to similarity assuming L2 or inner product space logic (Chroma default is l2, lower dist is better)
                         sim = 1.0 / (1.0 + dist) 
                         results.append({
+                            "id": res["ids"][0][i] if "ids" in res and res["ids"] else None,
                             "text": res["documents"][0][i],
                             "source_type": tag,
                             "metadata": res["metadatas"][0][i] if res["metadatas"] else {},

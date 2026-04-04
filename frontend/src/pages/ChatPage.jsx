@@ -1,9 +1,13 @@
 import { useState, useRef, useEffect } from "react";
+import axios from "axios";
+import PostModal from "../components/PostModal";
 
 export default function ChatPage() {
   const [query, setQuery] = useState("");
   const [messages, setMessages] = useState([]); // array of {role: 'user'|'assistant', content: str, meta: {...}}
   const [loading, setLoading] = useState(false);
+
+  const [modalPosts, setModalPosts] = useState(null);
 
   const endRef = useRef(null);
 
@@ -14,6 +18,21 @@ export default function ChatPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  const handleSourceClick = async (docId) => {
+    if (!docId || !docId.startsWith("post_")) return;
+    try {
+      const res = await axios.get(`http://127.0.0.1:8000/posts?id=${docId}`);
+      if (res.data.posts && res.data.posts.length > 0) {
+        setModalPosts(res.data.posts);
+      } else {
+        alert("Detailed post data not found.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Error loading post data.");
+    }
+  };
 
   const handleSubmit = async (e, forcedQuery = null) => {
     if (e) e.preventDefault();
@@ -212,6 +231,14 @@ export default function ChatPage() {
                           <p className="italic line-clamp-3 leading-relaxed mt-1">
                             "{src.text}"
                           </p>
+                          {src.source_type === "posts" && src.id && (
+                            <button
+                              onClick={() => handleSourceClick(src.id)}
+                              className="mt-2 text-blue-400 hover:text-blue-300 transition underline font-bold"
+                            >
+                              View Full Post Modal ↗
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -269,6 +296,10 @@ export default function ChatPage() {
           )}
         </button>
       </form>
+
+      {modalPosts && (
+        <PostModal posts={modalPosts} onClose={() => setModalPosts(null)} />
+      )}
     </div>
   );
 }

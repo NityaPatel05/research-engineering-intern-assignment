@@ -2,6 +2,7 @@
 
 import logging
 from contextlib import asynccontextmanager
+import os 
 
 logging.basicConfig(
     level=logging.INFO,
@@ -125,11 +126,32 @@ async def lifespan(app: FastAPI):
         raw_df = load_data(DATA_PATH)
         cleaned_df, bad_rows = clean_data(raw_df)
         profile = profile_data(cleaned_df)
+        logger.info("Loading or computing spam scores...")
+        spam_scores_file = "data/spam_scores.json"
         
-        logger.info("Computing spam scores...")
-        signals_df = compute_signals(cleaned_df)
-        signals_df = run_isolation_forest(signals_df)
-        spam_scores_cache = compute_spam_scores(signals_df)
+        # Ensure data dir exists
+        os.makedirs("data", exist_ok=True)
+        
+        try:
+            if os.path.exists(spam_scores_file):
+                logger.info("Found cached spam scores. Loading from JSON...")
+                with open(spam_scores_file, "r") as f:
+                    spam_scores_cache = json.load(f)
+            else:
+                logger.info("Cache missed. Computing isolated forest spam scores...")
+                signals_df = compute_signals(cleaned_df)
+                signals_df = run_isolation_forest(signals_df)
+                spam_scores_cache = compute_spam_scores(signals_df)
+                
+                # Save to cache
+                with open(spam_scores_file, "w") as f:
+                    json.dump(spam_scores_cache, f)
+                logger.info("Saved computed spam scores to JSON cache.")
+        except Exception as se:
+            logger.error(f"Failed to load cache, recomputing: {se}")
+            signals_df = compute_signals(cleaned_df)
+            signals_df = run_isolation_forest(signals_df)
+            spam_scores_cache = compute_spam_scores(signals_df)
         
         logger.info("Computing network graphs...")
         g1 = build_graph_1(cleaned_df)
@@ -572,3 +594,88 @@ async def chat_endpoint(req: ChatRequest):
     except Exception as e:
         logger.error(f"Error in /chat: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+    
+@app.get("/posts")
+async def get_posts(id: str = None, author: str = None, date: str = None):
+    try:
+        df = app_data.get("df")
+        if df is None or len(df) == 0:
+            return {"error": "Data not loaded yet", "posts": []}
+            
+        filtered_df = df
+        row_indices = []
+        
+        if id:
+            # Handle RAG source ID (e.g., 'post_1234')
+            if id.startswith("post_"):
+                try:
+                    idx = int(id.replace("post_", ""))
+                    if 0 <= idx < len(filtered_df):
+                        row_indices = [idx]
+                except ValueError:
+                    pass
+            else:
+                # If original reddit id
+                if "id" in filtered_df.columns:
+                    mask = filtered_df["id"] == id
+                    row_indices = mask.arg_true().to_list()
+        elif author:
+            mask = filtered_df["author"] == author
+            row_indices = mask.arg_true().to_list()
+        elif date:
+            mask = filtered_df["created_utc"].dt.strftime("%Y-%m-%d") == date
+            row_indices = mask.arg_true().to_list()
+            
+        if not row_indices:
+            return {"posts": []}
+            
+        # Cap to Top 50 to prevent huge payloads
+        row_indices = row_indices[:50]
+        
+        posts = []
+        spam_scores = app_data.get("spam_scores", {})
+        assignments = app_data.get("topics", {}).get("assignments", [])
+        topics_data = app_data.get("topics", {}).get("cached_data", {})
+        
+        for idx in row_indices:
+            row = filtered_df.row(idx, named=True)
+            auth = row.get("author", "")
+            spam_s = spam_scores.get(auth, {}).get("spam_score", 0.0)
+            
+            # Extract topic assigning
+            stage = "UNKNOWN"
+            badge = "🟣"
+            topic_id = "-1"
+            if len(assignments) > idx:
+                topic_id = str(assignments[idx])
+                topic_meta = topics_data.get("stages", {}).get(topic_id)
+                if topic_meta:
+                    stage = topic_meta.get("stage", "UNKNOWN")
+                    badge = topic_meta.get("badge_emoji", "🟣")
+                    
+            r_id = row.get("id", "")
+            subreddit = row.get("subreddit", "unknown")
+            permalink = row.get("permalink", f"https://reddit.com/r/{subreddit}/comments/{r_id}" if r_id else "")
+            
+            posts.append({
+                "id": r_id,
+                "internal_id": f"post_{idx}",
+                "title": row.get("title", ""),
+                "selftext": row.get("selftext", ""),
+                "author": auth,
+                "subreddit": subreddit,
+                "score": row.get("score", 0),
+                "permalink": permalink,
+                "created_utc": str(row.get("created_utc", "")),
+                "spam_score": round(float(spam_s), 3),
+                "lifecycle_stage": stage,
+                "badge": badge,
+                "topic_id": topic_id
+            })
+            
+        return {"posts": posts}
+    except Exception as e:
+        logger.error(f"Error in /posts: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+

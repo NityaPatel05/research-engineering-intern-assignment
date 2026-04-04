@@ -10,6 +10,7 @@ import {
   ResponsiveContainer,
   Scatter,
 } from "recharts";
+import PostModal from "../components/PostModal";
 
 const TOPIC_COLORS = [
   "#3b82f6",
@@ -31,6 +32,24 @@ export default function TimeSeriesPage({ spamThreshold }) {
 
   const [topicsData, setTopicsData] = useState(null);
   const [topicsLoading, setTopicsLoading] = useState(true);
+
+  const [modalPosts, setModalPosts] = useState(null);
+
+  const handleDotClick = async (dateStr) => {
+    try {
+      const res = await axios.get(
+        `http://127.0.0.1:8000/posts?date=${dateStr}`,
+      );
+      if (res.data.posts && res.data.posts.length > 0) {
+        setModalPosts(res.data.posts);
+      } else {
+        alert("No detailed posts retrieved for this date.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Failed to fetch posts.");
+    }
+  };
 
   const fetchData = useCallback(
     async (kw, sub) => {
@@ -272,7 +291,19 @@ export default function TimeSeriesPage({ spamThreshold }) {
                       stroke="#ef4444"
                       strokeWidth={0}
                       dot={{ r: 5, fill: "#ef4444", stroke: "#ef4444" }}
-                      activeDot={{ r: 7 }}
+                      activeDot={{
+                        r: 8,
+                        cursor: "pointer",
+                        onClick: (_, payload) => {
+                          if (
+                            payload &&
+                            payload.payload &&
+                            payload.payload.date
+                          ) {
+                            handleDotClick(payload.payload.date);
+                          }
+                        },
+                      }}
                       connectNulls={false}
                       name="Anomaly"
                       legendType="circle"
@@ -284,7 +315,19 @@ export default function TimeSeriesPage({ spamThreshold }) {
                       stroke="#f59e0b"
                       strokeWidth={0}
                       dot={{ r: 5, fill: "#f59e0b", stroke: "#f59e0b" }}
-                      activeDot={{ r: 7 }}
+                      activeDot={{
+                        r: 8,
+                        cursor: "pointer",
+                        onClick: (_, payload) => {
+                          if (
+                            payload &&
+                            payload.payload &&
+                            payload.payload.date
+                          ) {
+                            handleDotClick(payload.payload.date);
+                          }
+                        },
+                      }}
                       connectNulls={false}
                       name="Changepoint"
                       legendType="square"
@@ -513,6 +556,9 @@ export default function TimeSeriesPage({ spamThreshold }) {
           </>
         )}
       </div>
+      {modalPosts && (
+        <PostModal posts={modalPosts} onClose={() => setModalPosts(null)} />
+      )}
     </div>
   );
 }
