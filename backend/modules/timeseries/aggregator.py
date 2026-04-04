@@ -60,6 +60,8 @@ def aggregate_timeseries(df: pl.DataFrame, keyword: str = None, subreddit: str =
         weekly = filtered_df.group_by(
             pl.col("created_utc").dt.truncate("1w").alias("week")
         ).agg(pl.len().alias("count")).sort("week")
+        top_authors = filtered_df.group_by("author").agg(pl.len().alias("count")).sort("count", descending=True).limit(10).to_dicts()
+        top_subreddits = filtered_df.group_by("subreddit").agg(pl.len().alias("count")).sort("count", descending=True).limit(10).to_dicts()
 
         # Convert back to standard python types for JSON serialization via FastAPI
         return {
@@ -67,6 +69,8 @@ def aggregate_timeseries(df: pl.DataFrame, keyword: str = None, subreddit: str =
             "daily": daily.to_dicts(),
             "hourly": hourly.to_dicts(),
             "weekly": weekly.to_dicts(),
+            "top_authors": top_authors,
+            "top_subreddits": top_subreddits,
         }
 
     except Exception as e:
