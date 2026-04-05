@@ -3,6 +3,7 @@
 A social media analysis and investigative reporting platform built for the SimPPL Research Engineering Intern Assignment. The system traces how narratives emerge, amplify, and decay across Reddit communities by combining network analysis, topic modeling, spam detection, and semantic search into a single interactive dashboard.
 
 Live Dashboard: http://soc-media-analyser.s3-website-us-east-1.amazonaws.com/
+(Not to use chatbot in this it is loading pretraining sentence transformer due to which server gets off due to load , it will work perfectly locally)
 
 Video Walkthrough: https://drive.google.com/drive/folders/1s3N5Dwy0yEFc9HQdK6GyUBAvgdDMMsGR?usp=sharing
 
