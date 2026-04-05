@@ -4,7 +4,7 @@ A social media analysis and investigative reporting platform built for the SimPP
 
 Live Dashboard: http://soc-media-analyser.s3-website-us-east-1.amazonaws.com/
 
-Video Walkthrough: [https://your-video-link-here](https://your-video-link-here)
+Video Walkthrough: https://drive.google.com/drive/folders/1s3N5Dwy0yEFc9HQdK6GyUBAvgdDMMsGR?usp=sharing
 
 ---
 
