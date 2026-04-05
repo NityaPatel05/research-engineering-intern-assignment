@@ -13,9 +13,7 @@ logger = logging.getLogger(__name__)
 
 COLOR_PALETTE = ["#ef4444", "#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#14b8a6"]
 
-# Module-level quota guard
-_gemini_quota_exceeded = False
-_gemini_quota_reset_time = 0.0
+from config import get_gemini_api_key, mark_gemini_key_exhausted, increment_gemini_key_usage
 
 # ── Persistent label cache ────────────────────────────────────────────────────
 # Key: SHA-256 of sorted top-node list  →  Value: label string
@@ -44,8 +42,6 @@ def get_community_label(top_nodes: list) -> str:
     Results are cached by community fingerprint — identical node sets never
     trigger a second API call.
     """
-    global _gemini_quota_exceeded, _gemini_quota_reset_time
-
     # ── Cache hit ─────────────────────────────────────────────────────────────
     cache_key = _community_key(top_nodes)
     if cache_key in _label_cache:
@@ -53,15 +49,13 @@ def get_community_label(top_nodes: list) -> str:
         return _label_cache[cache_key]
 
     # ── Quota guard ───────────────────────────────────────────────────────────
-    if _gemini_quota_exceeded:
-        if time.time() < _gemini_quota_reset_time:
-            logger.info("Gemini daily quota exceeded — skipping label call.")
-            return "Unknown Cluster"
-        else:
-            _gemini_quota_exceeded = False
+    api_key = get_gemini_api_key()
+    if not api_key:
+        logger.info("All Gemini API keys exhausted or none provided — skipping label call.")
+        return "Unknown Cluster"
 
     try:
-        genai.configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
+        genai.configure(api_key=api_key)
         model = genai.GenerativeModel("gemini-2.5-flash")
 
         prompt = f"""
@@ -72,6 +66,7 @@ def get_community_label(top_nodes: list) -> str:
         """
         # Throttle: stay under 5 req/min rate limit
         time.sleep(13)
+        increment_gemini_key_usage(api_key)
         response = model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(max_output_tokens=20, temperature=0.3)
@@ -89,10 +84,9 @@ def get_community_label(top_nodes: list) -> str:
     except Exception as e:
         err_str = str(e)
         logger.error(f"Gemini API call failed for label: {e}")
-        if "GenerateRequestsPerDay" in err_str or ("429" in err_str and "limit: 20" in err_str):
-            _gemini_quota_exceeded = True
-            _gemini_quota_reset_time = time.time() + 86400
-            logger.warning("Gemini daily quota exhausted — community labelling disabled for 24h.")
+        if "GenerateRequestsPerDay" in err_str or ("429" in err_str and "limit: 20" in err_str) or "Quota exceeded" in err_str:
+            mark_gemini_key_exhausted(api_key)
+            logger.warning("Gemini daily quota exhausted for this key — marked for 24h.")
         return "Unknown Cluster"
 
 
@@ -180,5 +174,5 @@ def compute_metrics(G_nx: nx.Graph) -> dict:
 
     except Exception as e:
         logger.error(f"Error computing metrics: {e}")
-        return {"metrics": {}, "assignments": {}, "labels": {}}
+#         return {"metrics": {}, "assignments": {}, "labels": {}}
 

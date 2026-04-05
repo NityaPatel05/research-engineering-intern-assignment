@@ -152,6 +152,7 @@ def run_indexer(df: pl.DataFrame, embeddings_res: dict, app_data: dict, client, 
             # To re-enable: uncomment the block below and remove the deterministic desc line.
             # genai.configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
             # llm = genai.GenerativeModel("gemini-2.5-flash")
+            from config import get_gemini_api_key, mark_gemini_key_exhausted, increment_gemini_key_usage
 
             t_assigns = app_data.get("topics", {}).get("assignments", [])
             for tid, terms in topics_res["top_terms"].items():
@@ -167,15 +168,24 @@ def run_indexer(df: pl.DataFrame, embeddings_res: dict, app_data: dict, client, 
 
                 # Deterministic description — no Gemini quota used.
                 # Works identically for RAG vector search since terms+titles carry all signal.
-                desc = f"A discussion cluster focused on {terms}. Sample posts: {' | '.join(sample_titles)}"
-
-                # --- Gemini version (commented out) ---
-                # prompt = f"Summarize this social media topic in EXACTLY 2 sentences. Top terms: {terms}. Sample posts: {' | '.join(sample_titles)}"
-                # try:
-                #     res = llm.generate_content(prompt, generation_config=genai.types.GenerationConfig(max_output_tokens=150, temperature=0.3))
-                #     desc = res.text.replace('"', '').strip()
-                # except:
-                #     desc = f"A discussion cluster focused on {terms}."
+                prompt = f"Summarize this social media topic in EXACTLY 2 sentences. Top terms: {terms}. Sample posts: {' | '.join(sample_titles)}"
+                
+                api_key = get_gemini_api_key()
+                if api_key:
+                    try:
+                        genai.configure(api_key=api_key)
+                        llm = genai.GenerativeModel("gemini-2.5-flash")
+                        increment_gemini_key_usage(api_key)
+                        res = llm.generate_content(prompt, generation_config=genai.types.GenerationConfig(max_output_tokens=150, temperature=0.3))
+                        desc = res.text.replace('"', '').strip()
+                    except Exception as e:
+                        err_str = str(e)
+                        if "GenerateRequestsPerDay" in err_str or ("429" in err_str and "limit: 20" in err_str) or "Quota exceeded" in err_str:
+                            mark_gemini_key_exhausted(api_key)
+                            logger.warning("Gemini key exhausted in indexer — marked for 24h.")
+                        desc = f"A discussion cluster focused on {terms}. Sample posts: {' | '.join(sample_titles)}"
+                else:
+                    desc = f"A discussion cluster focused on {terms}. Sample posts: {' | '.join(sample_titles)}"
                     
                 stage_data = topics_res.get("stages", {}).get(tid, {})
                 stage = stage_data.get("stage", "UNKNOWN")

@@ -248,8 +248,10 @@ async def health_check():
         gemini_ok = False
         try:
             import google.generativeai as genai
-            import os
-            api_key = os.environ.get("GEMINI_API_KEY", "")
+            
+            
+            from config import get_gemini_api_key
+            api_key = get_gemini_api_key()
             if api_key:
                 genai.configure(api_key=api_key)
                 gemini_ok = True

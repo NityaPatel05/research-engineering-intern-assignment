@@ -10,24 +10,19 @@ logger = logging.getLogger(__name__)
 _summary_cache: dict = {}
 _CACHE_TTL_SECONDS = 1800  # reuse result for 30 minutes
 
-# Daily quota guard
-_gemini_quota_exceeded = False
-_gemini_quota_reset_time = 0.0
+from config import get_gemini_api_key, mark_gemini_key_exhausted, increment_gemini_key_usage
 
 def get_gemini_summary(text_prompt: str) -> str:
-    """Wrapper for gemini call with daily quota guard."""
-    global _gemini_quota_exceeded, _gemini_quota_reset_time
-
-    if _gemini_quota_exceeded:
-        if time.time() < _gemini_quota_reset_time:
-            logger.info("Gemini daily quota exceeded — returning empty summary.")
-            return ""
-        else:
-            _gemini_quota_exceeded = False
+    """Wrapper for gemini call with multi-key daily quota guard."""
+    api_key = get_gemini_api_key()
+    if not api_key:
+        logger.info("All Gemini API keys exhausted or none provided — returning empty summary.")
+        return ""
 
     try:
-        genai.configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
+        genai.configure(api_key=api_key)
         model = genai.GenerativeModel("gemini-2.5-flash")
+        increment_gemini_key_usage(api_key)
         response = model.generate_content(
             text_prompt,
             generation_config=genai.types.GenerationConfig(
@@ -40,10 +35,9 @@ def get_gemini_summary(text_prompt: str) -> str:
     except Exception as e:
         err_str = str(e)
         logger.error(f"Gemini API call failed: {e}")
-        if "GenerateRequestsPerDay" in err_str or ("429" in err_str and "limit: 20" in err_str):
-            _gemini_quota_exceeded = True
-            _gemini_quota_reset_time = time.time() + 86400
-            logger.warning("Gemini daily quota exhausted — summaries disabled for 24h.")
+        if "GenerateRequestsPerDay" in err_str or ("429" in err_str and "limit: 20" in err_str) or "Quota exceeded" in err_str:
+            mark_gemini_key_exhausted(api_key)
+            logger.warning("Gemini daily quota exhausted for this key — marked for 24h.")
         return ""
 
 def summarize_timeseries(weekly_data, anomaly_result: dict = None) -> str:
